@@ -12,23 +12,52 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"os"
+
+	"github.com/threemates/antariksh/services/builder/internal/build"
 )
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
+
+	// `builder build <projectDir> <out.ext4> [tag]` builds a project into a
+	// bootable Firecracker rootfs (Docker → export → mkfs.ext4 with /init).
+	if len(os.Args) > 1 && os.Args[1] == "build" {
+		if err := runBuild(os.Args[2:]); err != nil {
+			log.Error("build failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	log.Info("builder starting",
 		"registry", envOr("REGISTRY_URL", "http://127.0.0.1:5000"),
 		"nats_url", envOr("NATS_URL", "nats://127.0.0.1:4222"),
 		"buildkit_addr", envOr("BUILDKIT_ADDR", "unix:///run/buildkit/buildkitd.sock"),
 	)
-	// TODO: NATS consumer on "platform.build.>"
-	// TODO: BuildKit client for layer-cached builds
-	// TODO: Nixpacks/Buildpack detection logic
-	// TODO: Trivy scan gate before registry push
+	// TODO: NATS consumer on "platform.build.>" + BuildKit + Trivy gate
 	select {}
+}
+
+func runBuild(args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: builder build <projectDir> <out.ext4> [tag]")
+	}
+	projectDir, out := args[0], args[1]
+	tag := "antariksh/app:latest"
+	if len(args) > 2 {
+		tag = args[2]
+	}
+	res, err := build.BuildRootfs(context.Background(), projectDir, tag, out)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("built %s → %s\n", res.ImageRef, res.RootfsPath)
+	return nil
 }
 
 func envOr(key, def string) string {
