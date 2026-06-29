@@ -1,0 +1,105 @@
+# platform.toml — Antariksh deploy manifest
+# Place this file at the root of your project.
+# git push → antctl reads this → build → deploy.
+
+[app]
+name    = "my-api"
+org     = "acme"
+project = "backend"
+region  = "in-mum-1"  # see: antctl regions
+
+# ── Build ────────────────────────────────────────────────────────────────────
+
+[build]
+# builder: "nixpacks" (auto-detect, default) | "buildpack" | "dockerfile"
+builder = "nixpacks"
+# Uncomment for dockerfile builds:
+# dockerfile = "Dockerfile"
+# build_args = { NODE_ENV = "production" }
+# build_secrets = ["kv/my-api/npm-token"]  # Vault paths, injected at build time
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+
+[compute]
+# Compute tier: "shared" | "dedicated" | "enterprise"
+tier = "shared"
+
+# microVM sizing (Firecracker)
+vcpu   = 1
+memory = "512mb"
+
+# Scale-to-zero: suspend the VM after N minutes of no inbound traffic.
+# The edge proxy wakes it on the next request (~125ms cold start from NVMe snapshot).
+scale_to_zero_after = "10m"
+
+# Horizontal scaling bounds
+min_replicas = 1
+max_replicas = 10
+
+# Autoscale policy: "cpu" | "rps" | "custom"
+[compute.autoscale]
+metric    = "rps"
+threshold = 50    # scale out when RPS per replica exceeds this
+cooldown  = "60s"
+
+# ── Services ──────────────────────────────────────────────────────────────────
+
+[[service]]
+name     = "web"
+command  = []           # empty = default CMD from image
+internal_port = 8080
+protocol = "http"
+
+[[service.health_check]]
+path     = "/healthz"
+interval = "10s"
+timeout  = "3s"
+
+[[service.env]]
+# Plain env vars (non-sensitive).
+name  = "LOG_LEVEL"
+value = "info"
+
+[[service.secret_refs]]
+# Secrets pulled from Vault at deploy time; injected as env vars in the microVM.
+env_var    = "DATABASE_URL"
+vault_path = "kv/my-api/db-url"
+
+[[service.secret_refs]]
+env_var    = "API_KEY"
+vault_path = "kv/my-api/api-key"
+
+# ── Database ──────────────────────────────────────────────────────────────────
+
+[[database]]
+name    = "main"
+engine  = "postgres"        # serverless PG (Neon engine)
+version = "17"
+region  = "in-mum-1"       # must satisfy residency rule for data_class
+data_class = "personal"     # pins this DB to hard-residency regions
+
+# Branch per environment automatically (enabled by default for preview envs)
+auto_branch_on_preview = true
+
+# ── Networking ────────────────────────────────────────────────────────────────
+
+[domains]
+# Auto-provisioned: my-api.in-mum-1.antariksh.app
+# Add custom domains here:
+# custom = ["api.acme.com"]
+
+[networking]
+# Private 6PN networking between services in the same org
+private = true
+
+# ── Environments ─────────────────────────────────────────────────────────────
+
+[environments.production]
+min_replicas = 2
+scale_to_zero_after = ""   # never scale to zero in prod
+
+[environments.staging]
+min_replicas = 1
+
+# Preview environments (per-PR) inherit defaults.
+# They always scale-to-zero and get a DB branch automatically.

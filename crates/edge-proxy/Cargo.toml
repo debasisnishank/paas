@@ -1,0 +1,38 @@
+[package]
+name        = "edge-proxy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Antariksh edge proxy — TLS termination, autostart-on-request, load-shedding, routing"
+
+[[bin]]
+name = "edge-proxy"
+path = "src/main.rs"
+
+[dependencies]
+tokio.workspace        = true
+hyper.workspace        = true
+hyper-util             = { workspace = true, features = ["client-legacy", "http1", "tokio"] }
+http-body-util.workspace = true
+rustls.workspace       = true
+rustls-pemfile.workspace = true
+tokio-rustls.workspace = true
+tracing.workspace      = true
+tracing-subscriber.workspace = true
+config.workspace       = true
+serde.workspace        = true
+serde_json.workspace   = true
+anyhow.workspace       = true
+thiserror.workspace    = true
+reqwest.workspace      = true
+
+# ACME (Let's Encrypt DNS-01 / HTTP-01)
+instant-acme = "0.7"
+# Connection limiting / load-shedding
+tower        = { version = "0.5", features = ["limit", "load-shed", "timeout"] }
+tower-http   = { version = "0.6", features = ["trace", "request-id"] }
+# Metrics (VictoriaMetrics-compatible Prometheus exposition)
+prometheus-client = "0.22"
+# NOTE: consistent-hash backend selection uses std's DefaultHasher for now.
+# The previous `fasthash` dep was dropped — its `fasthash-sys` C++ backend
+# hard-codes x86 AES/AVX intrinsics and does not build on arm64 (Apple Silicon).

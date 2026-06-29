@@ -1,0 +1,11 @@
+go 1.23
+
+use (
+	./cli
+	./services/api
+	./services/billing
+	./services/builder
+	./services/dns
+	./services/scheduler
+	./services/storage-cp
+)

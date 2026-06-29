@@ -1,0 +1,1 @@
+// shed module — stub

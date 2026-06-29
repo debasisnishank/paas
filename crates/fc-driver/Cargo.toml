@@ -1,0 +1,35 @@
+[package]
+name        = "fc-driver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Firecracker Nomad task driver — launches/stops/snapshots microVMs"
+
+[[bin]]
+name = "fc-driver"
+path = "src/main.rs"
+
+[dependencies]
+tokio.workspace      = true
+serde.workspace      = true
+serde_json.workspace = true
+anyhow.workspace     = true
+thiserror.workspace  = true
+tracing.workspace    = true
+tracing-subscriber.workspace = true
+reqwest.workspace    = true   # Firecracker VMM API (Unix socket via HTTP)
+config.workspace     = true
+
+# Nomad task driver plugin protocol (gRPC)
+tonic          = "0.12"
+prost          = "0.13"
+
+# Linux-only deps, gated so the workspace still compiles on macOS for dev.
+# fc-driver is a Linux-only binary in practice (Firecracker requires Linux/KVM);
+# rtnetlink → netlink-sys references libc::sockaddr_nl (Linux netlink), and the
+# jailer needs setuid/chroot/mount. Neither is used by code yet (stubs).
+[target.'cfg(target_os = "linux")'.dependencies]
+# WireGuard peer management for 6PN mesh
+rtnetlink.workspace = true
+# jailer integration (setuid/chroot for Firecracker isolation)
+nix = { version = "0.29", features = ["process", "user", "mount"] }

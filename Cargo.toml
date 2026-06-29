@@ -1,0 +1,39 @@
+[workspace]
+members = [
+    "crates/edge-proxy",
+    "crates/fc-driver",
+]
+resolver = "2"
+
+[workspace.package]
+version    = "0.1.0"
+edition    = "2021"
+license    = "Apache-2.0"
+authors    = ["Antariksh Platform <platform@threemates.tech>"]
+
+[workspace.dependencies]
+# async runtime
+tokio        = { version = "1", features = ["full"] }
+# HTTP
+hyper        = { version = "1", features = ["full"] }
+hyper-util   = { version = "0.1" }
+http-body-util = { version = "0.1" }
+# TLS
+rustls       = { version = "0.23" }
+rustls-pemfile = { version = "2" }
+tokio-rustls = { version = "0.26" }
+# Observability
+tracing      = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Config
+config       = "0.14"
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+# Error handling
+anyhow       = "1"
+thiserror    = "1"
+# Firecracker API (HTTP)
+reqwest      = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+# WireGuard / netlink (for 6PN mesh)
+netlink-packet-core = "0.7"
+rtnetlink    = "0.14"
