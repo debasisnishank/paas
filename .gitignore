@@ -1,0 +1,18 @@
+# Rust build artifacts (workspace target dir)
+/target/
+**/target/
+
+# Go / CLI build output
+cli/dist/
+
+# Local binaries occasionally built into the tree
+/bin/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*.swo
+
+# Local env / secrets (never commit)
+*.local.env
+.env
