@@ -4,8 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -28,9 +30,15 @@ type deployResponse struct {
 	URL string `json:"url,omitempty"`
 }
 
+// maxDeployMemory is how much of a multipart upload is buffered in memory before
+// the rest spills to a temp file (32 MiB).
+const maxDeployMemory = 32 << 20
+
 // deployHandler records a deploy intent and, if a scheduler is configured, asks
-// it to boot the microVM and route a URL to it. With no scheduler, it just
-// records the pending intent (the scheduler/NATS path fills in later).
+// it to boot the microVM and route a URL to it. A multipart upload carrying a
+// `source` tarball triggers a build-from-source deploy; a JSON body (or empty
+// body) boots the default rootfs. With no scheduler it just records the pending
+// intent (the scheduler/NATS path fills in later).
 func deployHandler(store *deploystore.Store, sched *scheduler.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		svcID := domain.ServiceID(chi.URLParam(r, "serviceID"))
@@ -39,11 +47,31 @@ func deployHandler(store *deploystore.Store, sched *scheduler.Client) http.Handl
 			return
 		}
 
-		var req deployRequest
-		// An empty body is allowed — defaults apply.
-		if r.Body != nil {
+		var (
+			req    deployRequest
+			source io.Reader // non-nil → build-from-source
+		)
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+			if err := r.ParseMultipartForm(maxDeployMemory); err != nil {
+				writeJSONError(w, http.StatusBadRequest, "parse upload: "+err.Error())
+				return
+			}
+			req.Image = r.FormValue("image")
+			req.Region = r.FormValue("region")
+			req.Env = r.FormValue("env")
+			req.Builder = r.FormValue("builder")
+			file, _, err := r.FormFile("source")
+			if err != nil {
+				writeJSONError(w, http.StatusBadRequest, "missing source file: "+err.Error())
+				return
+			}
+			defer func() { _ = file.Close() }()
+			source = file
+		} else if r.Body != nil {
+			// An empty body is allowed — defaults apply.
 			_ = json.NewDecoder(r.Body).Decode(&req)
 		}
+
 		envName := req.Env
 		if envName == "" {
 			envName = "production"
@@ -60,7 +88,16 @@ func deployHandler(store *deploystore.Store, sched *scheduler.Client) http.Handl
 
 		var url string
 		if sched != nil {
-			if res, err := sched.Deploy(r.Context(), string(svcID), req.Image); err != nil {
+			var (
+				res scheduler.Result
+				err error
+			)
+			if source != nil {
+				res, err = sched.DeployWithSource(r.Context(), string(svcID), req.Image, source)
+			} else {
+				res, err = sched.Deploy(r.Context(), string(svcID), req.Image)
+			}
+			if err != nil {
 				slog.Error("scheduler deploy failed", "service", svcID, "err", err)
 			} else {
 				dep.Status = domain.DeployLive

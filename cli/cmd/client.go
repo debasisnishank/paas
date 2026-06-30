@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"time"
 
@@ -29,7 +30,10 @@ func newRequest(ctx context.Context, method, path string, body io.Reader) (*http
 }
 
 func do(req *http.Request, out any) error {
-	client := &http.Client{Timeout: 15 * time.Second}
+	return doWith(&http.Client{Timeout: 15 * time.Second}, req, out)
+}
+
+func doWith(client *http.Client, req *http.Request, out any) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", req.Method, req.URL, err)
@@ -69,4 +73,37 @@ func apiPost(ctx context.Context, path string, body, out any) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	return do(req, out)
+}
+
+// apiPostMultipart streams a multipart/form-data POST: text fields plus one file
+// part (fileField/fileName) read from file. Used to upload a deploy's source
+// tarball. Uses a long timeout since the server builds and boots a microVM.
+func apiPostMultipart(ctx context.Context, path string, fields map[string]string, fileField, fileName string, file io.Reader, out any) error {
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+	go func() {
+		var werr error
+		defer func() { _ = pw.CloseWithError(werr) }()
+		for k, v := range fields {
+			if werr = mw.WriteField(k, v); werr != nil {
+				return
+			}
+		}
+		fw, err := mw.CreateFormFile(fileField, fileName)
+		if err != nil {
+			werr = err
+			return
+		}
+		if _, werr = io.Copy(fw, file); werr != nil {
+			return
+		}
+		werr = mw.Close()
+	}()
+
+	req, err := newRequest(ctx, http.MethodPost, path, pr)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return doWith(&http.Client{Timeout: 15 * time.Minute}, req, out)
 }
