@@ -69,6 +69,12 @@ func (e *Exec) Boot(ctx context.Context, spec orchestrator.BootSpec) error {
 		"console=ttyS0 reboot=k panic=1 pci=off ip=%s::%s:255.255.255.0::eth0:off init=/init",
 		spec.GuestIP, spec.HostIP,
 	)
+	// Per-VM API socket — fc-driver defaults to a single fixed path, which would
+	// collide across concurrent VMs (and with any stale, differently-owned
+	// socket). Remove a stale one first so bind always succeeds.
+	sock := "/tmp/fc-" + spec.TapDev + ".sock"
+	_ = os.Remove(sock)
+
 	logf, _ := os.Create("/tmp/fcvm-" + spec.TapDev + ".log")
 	cmd := exec.Command(e.FcDriverBin, "vm-boot",
 		"--fc-bin", e.FirecrackerBin,
@@ -76,6 +82,7 @@ func (e *Exec) Boot(ctx context.Context, spec orchestrator.BootSpec) error {
 		"--rootfs", rootfs,
 		"--tap", spec.TapDev,
 		"--guest-mac", spec.GuestMAC,
+		"--sock", sock,
 		"--boot-args", bootArgs,
 		"--console", "/tmp/fccon-"+spec.TapDev+".log",
 	)
@@ -108,6 +115,7 @@ func (e *Exec) Stop(ctx context.Context, tapDev string) error {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	_ = sudo(ctx, "ip", "link", "del", tapDev)
+	_ = os.Remove("/tmp/fc-" + tapDev + ".sock")
 	return nil
 }
 

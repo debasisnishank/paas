@@ -1,0 +1,21 @@
+# platform.toml — deploy manifest for the Antariksh sample app.
+# Used to exercise the full `antctl deploy` build-from-source path.
+
+[app]
+name    = "sample"
+org     = "acme"
+project = "backend"
+region  = "in-mum-1"
+
+[build]
+builder = "dockerfile"
+
+[compute]
+tier   = "shared"
+vcpu   = 1
+memory = "256mb"
+
+[[service]]
+name          = "web"
+internal_port = 80
+protocol      = "http"

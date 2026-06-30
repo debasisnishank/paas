@@ -33,7 +33,9 @@ func main() {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
+	// No global request timeout: the deploy route builds + boots a microVM,
+	// which can take minutes. It carries its own (longer) timeout; see
+	// registerV1Routes. Fast routes return immediately anyway.
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -49,11 +51,13 @@ func main() {
 	r.Route("/v1", v1Router(authSecret, apiKey, deploys, sched))
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%s", port),
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Addr:    fmt.Sprintf(":%s", port),
+		Handler: r,
+		// No Read/Write timeouts: deploy streams a source upload and then waits
+		// on a build+boot (minutes). ReadHeaderTimeout still guards slowloris;
+		// per-route timeouts bound the rest.
+		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
@@ -91,6 +95,9 @@ func v1Router(authSecret []byte, apiKey string, deploys *deploystore.Store, sche
 	}
 }
 
+// deployTimeout bounds a build-from-source deploy (docker build + microVM boot).
+const deployTimeout = 20 * time.Minute
+
 func registerV1Routes(r chi.Router, deploys *deploystore.Store, sched *scheduler.Client) {
 	r.Get("/regions", regionsHandler)
 
@@ -105,7 +112,10 @@ func registerV1Routes(r chi.Router, deploys *deploystore.Store, sched *scheduler
 					r.Post("/", stubHandler("create-service"))
 					r.Route("/{serviceID}", func(r chi.Router) {
 						r.Get("/", stubHandler("get-service"))
-						r.Post("/deploy", deployHandler(deploys, sched))
+						// Deploy is long-running (build + boot); give it a
+						// generous timeout instead of the default request budget.
+						r.With(middleware.Timeout(deployTimeout)).
+							Post("/deploy", deployHandler(deploys, sched))
 						r.Get("/deployments", listDeploymentsHandler(deploys))
 						r.Get("/logs", stubHandler("stream-logs"))
 					})
