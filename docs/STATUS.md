@@ -16,7 +16,7 @@ Legend:
 - **WORKING** — does its job end to end.
 - **MISSING** — described in CLAUDE.md but not present in the tree.
 
-_Last verified: 2026-06-29 by reading the tree. Update the date when you change status._
+_Last verified: 2026-06-30 by reading the tree + box e2e. Update the date when you change status._
 
 > ✅ **Build blocker RESOLVED (2026-06-29):** `services/scheduler/go.mod` previously
 > pinned `github.com/hashicorp/nomad/api` to a fake placeholder pseudo-version that
@@ -71,7 +71,7 @@ _Last verified: 2026-06-29 by reading the tree. Update the date when you change 
 | `services/billing` | **STUB** | `cmd/billing/main.go` (~35 LOC): boots and parks. No Lago, Razorpay, GST, or metering consumer. |
 | `services/dns` | **STUB** | `cmd/dns/main.go` (~31 LOC): boots and parks. No PowerDNS client, no ACME responder. |
 | `services/storage-cp` | **STUB** | `cmd/storage-cp/main.go` (~38 LOC): boots and parks. No Pageserver/Safekeeper orchestration, no branch API, no PITR. |
-| `services/builder` | **STUB** | `cmd/builder/main.go` (~39 LOC): boots and parks. No Nixpacks/BuildKit/Trivy. |
+| `services/builder` | **PARTIAL** | `cmd/builder/main.go` daemon still boots-and-parks (no NATS consumer/Nixpacks/Trivy yet). **`builder build <dir> <out.ext4> [tag]` WORKING** — `internal/build` does `docker build` → container export → inject `/init` → `mkfs.ext4 -d`, producing a bootable microVM rootfs (`build.go`, unit-tested on Mac). `dev/sample-app` (multi-stage Go HTTP server on :80) is the fixture. **Box-verified e2e (BUILT_ROOTFS_BOOT_OK, 2026-06-30):** `builder build dev/sample-app /tmp/app.ext4` → `fc-driver vm-boot` (TAP, guest 172.16.0.2) → `/init` runs the built binary → `curl http://172.16.0.2/` returns `Hello from a BUILT Antariksh app`. This replaces the prebuilt-Alpine rootfs the deploy spine had used. Box notes: pass `--fc-bin` to fc-driver under sudo (firecracker not on root PATH); boot a long-running server **without** `--wait`. Still no BuildKit/Trivy/registry-push. |
 
 All services share: `log/slog` JSON handler, `envOr()` config, distroless `Dockerfile`, entry in `go.work`.
 No service currently imports NATS, Temporal, or Vault. **The NATS event bus is not wired anywhere yet.**

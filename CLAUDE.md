@@ -245,7 +245,7 @@ Placement engine intersects (data class × jurisdiction profile) at write time �
 
 ### `services/builder` (Go)
 - [ ] NATS consumer on `platform.build.>`
-- [ ] Builder detection: Nixpacks → Buildpacks → Dockerfile
+- [~] Builder detection: Nixpacks → Buildpacks → Dockerfile — Dockerfile path done (`internal/build`: `docker build` → export → `/init` inject → `mkfs.ext4 -d` → bootable rootfs; box-verified BUILT_ROOTFS_BOOT_OK). Nixpacks/Buildpacks auto-detect TODO
 - [ ] BuildKit gRPC client with layer cache
 - [ ] Ephemeral Firecracker build VM via Nomad (dogfooding)
 - [ ] Trivy scan gate — block push on CRITICAL CVE
