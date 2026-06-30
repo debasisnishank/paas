@@ -99,9 +99,9 @@ Placement engine intersects (data class × jurisdiction profile) at write time �
 - [ ] Custom Firecracker task driver (`crates/fc-driver`) — gRPC plugin handshake with Nomad
 - [~] Firecracker VMM boot: microVM boots to userspace via `fc-driver` (`firecracker.rs` MicroVm + `fc-driver vm-boot`, verified on KVM host). OCI-image → rootfs conversion and NVMe snapshot still TODO
 - [x] Edge proxy HTTP listener (`crates/edge-proxy`) — plaintext, no TLS yet (hyper 1.x listener + reverse proxy, `/healthz`, host-based routing; verified e2e)
-- [x] Deploy a container → get a public URL via the edge proxy — **driven by `antctl deploy`** (box-verified, ANTCTL_DEPLOY_TO_URL_OK): `antctl login` → `antctl deploy` → API → scheduler → `fc-driver` boots the microVM → edge-proxy route registered → `http://web.local` resolves. Remaining polish: multi-VM bridge networking, real OCI-image→rootfs
+- [x] Deploy a container → get a public URL via the edge proxy — **driven by `antctl deploy`, now build-from-source** (box-verified, ANTCTL_BUILD_DEPLOY_OK): `antctl deploy` uploads the project → API → scheduler builds the source into an ext4 rootfs (`builder`) → `fc-driver` boots it → edge-proxy route → URL serves the BUILT app. Remaining polish: multi-VM bridge networking, route via a real Nomad job
 - [ ] ACME (Let's Encrypt) DNS-01 TLS provisioning
-- [~] Prove end-to-end: `antctl deploy` → … → URL — **DONE for the deploy→URL spine** (antctl → API → scheduler → Firecracker microVM → edge-proxy URL, verified on KVM host). Still using a prebuilt rootfs (no image build step) and `fc-driver` directly (not via a Nomad job in this path)
+- [~] Prove end-to-end: `antctl deploy` → … → URL — **DONE incl. build-from-source** (antctl uploads source → API → scheduler builds rootfs via `builder` → Firecracker microVM → edge-proxy URL, verified on KVM host, ANTCTL_BUILD_DEPLOY_OK). Still uses `fc-driver` directly (not via a Nomad job in this path); single-VM only
 
 ### Phase 1 — MVP PaaS (Q1)
 - [ ] CLI (`antctl`) — full deploy/logs/scale/secrets/db/ssh/regions/open
@@ -201,7 +201,7 @@ Placement engine intersects (data class × jurisdiction profile) at write time �
 ### `services/api` (Go)
 - [~] Auth middleware — HS256 JWT bearer auth done (`internal/auth`, `POST /v1/auth/login`, protects `/v1`); SPIFFE mTLS for service-to-service still TODO
 - [ ] Org / Project / Service / Environment CRUD handlers
-- [~] Deploy handler — records a pending Deployment + `GET …/deployments` (`cmd/api/deploy.go`, `internal/deploystore`); NATS publish `platform.deploy.<orgID>` still TODO
+- [~] Deploy handler — records a Deployment + `GET …/deployments`, and drives the scheduler to build-from-source + boot + route a URL (multipart source upload → `scheduler.Client.DeployWithSource`); box-verified ANTCTL_BUILD_DEPLOY_OK. NATS publish `platform.deploy.<orgID>` still TODO
 - [ ] Log streaming endpoint (SSE, fan-out from Loki)
 - [ ] Secrets API (proxy to Vault, never store in our DB)
 - [x] Regions endpoint — `GET /v1/regions` + jurisdiction profiles (in-memory catalog in `internal/regions`; DB-backed `regions` table still TBD)
@@ -254,7 +254,7 @@ Placement engine intersects (data class × jurisdiction profile) at write time �
 
 ### `cli/` (Go — antctl)
 - [~] Auth: `antctl login` (email + API key) → store token in `~/.antctl.yaml`, attach as bearer on all calls. OIDC/device flow still TODO
-- [~] `deploy` — read `platform.toml` + POST deploy done (`cli/cmd/deploy.go`); build + log streaming with `--watch` still TODO
+- [~] `deploy` — reads `platform.toml`, streams a gzip-tar of the project as the build context → API builds-from-source + boots → live URL (box-verified ANTCTL_BUILD_DEPLOY_OK); `--watch` log streaming still TODO
 - [ ] `logs` — SSE stream with lipgloss level colouring
 - [ ] `scale` — replica count or `--zero` for autostop
 - [ ] `secrets set/get/rm/list` — proxy to API → Vault
