@@ -59,6 +59,12 @@ func (e *Exec) Boot(ctx context.Context, spec orchestrator.BootSpec) error {
 		return err
 	}
 
+	// A freshly built rootfs (per-deploy) overrides the configured default.
+	rootfs := e.RootfsPath
+	if spec.RootfsPath != "" {
+		rootfs = spec.RootfsPath
+	}
+
 	bootArgs := fmt.Sprintf(
 		"console=ttyS0 reboot=k panic=1 pci=off ip=%s::%s:255.255.255.0::eth0:off init=/init",
 		spec.GuestIP, spec.HostIP,
@@ -67,7 +73,7 @@ func (e *Exec) Boot(ctx context.Context, spec orchestrator.BootSpec) error {
 	cmd := exec.Command(e.FcDriverBin, "vm-boot",
 		"--fc-bin", e.FirecrackerBin,
 		"--kernel", e.KernelPath,
-		"--rootfs", e.RootfsPath,
+		"--rootfs", rootfs,
 		"--tap", spec.TapDev,
 		"--guest-mac", spec.GuestMAC,
 		"--boot-args", bootArgs,

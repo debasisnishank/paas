@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/threemates/antariksh/services/scheduler/internal/buildrunner"
 	"github.com/threemates/antariksh/services/scheduler/internal/edgeproxy"
 	"github.com/threemates/antariksh/services/scheduler/internal/ipam"
 	"github.com/threemates/antariksh/services/scheduler/internal/orchestrator"
@@ -27,8 +28,10 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 
-	// `scheduler deploy <service> [image]` boots a microVM via fc-driver and
-	// registers its route with edge-proxy — the orchestrator's real wiring.
+	// `scheduler deploy <service> [image-or-sourceDir]` boots a microVM via
+	// fc-driver and registers its route with edge-proxy. If the 2nd arg is an
+	// existing directory it is built into a rootfs first (build-from-source);
+	// otherwise it's treated as an image ref and the default rootfs is booted.
 	// (NATS/Temporal-driven deploys are still TODO; this is the direct path.)
 	if len(os.Args) > 1 && os.Args[1] == "deploy" {
 		if err := runDeploy(os.Args[2:]); err != nil {
@@ -51,7 +54,9 @@ func main() {
 	}
 }
 
-// buildOrchestrator wires the orchestrator from environment configuration.
+// buildOrchestrator wires the orchestrator from environment configuration. It
+// always attaches a Builder (shelling out to BUILDER_BIN) so deploys carrying
+// source are built into a fresh rootfs; deploys without source boot FC_ROOTFS.
 func buildOrchestrator() *orchestrator.Orchestrator {
 	run := runner.NewExec(
 		envOr("FC_DRIVER_BIN", "fc-driver"),
@@ -60,28 +65,37 @@ func buildOrchestrator() *orchestrator.Orchestrator {
 		envOr("FC_ROOTFS", os.Getenv("HOME")+"/fc-assets/alpine-http.ext4"),
 		envOr("TAP_USER", os.Getenv("USER")),
 	)
+	builder := buildrunner.NewExec(
+		envOr("BUILDER_BIN", "builder"),
+		envOr("BUILD_OUT_DIR", ""),
+	)
 	return orchestrator.New(
 		ipam.New(),
 		edgeproxy.New(envOr("EDGE_PROXY_ADMIN", "http://127.0.0.1:9901")),
 		run,
 		envOr("DEPLOY_DOMAIN", "local"),
-	)
+	).WithBuilder(builder)
 }
 
 func runDeploy(args []string) error {
-	service := "web"
-	image := "local-rootfs"
+	req := orchestrator.Request{Service: "web", Image: "local-rootfs"}
 	if len(args) > 0 {
-		service = args[0]
+		req.Service = args[0]
 	}
 	if len(args) > 1 {
-		image = args[1]
+		// An existing directory → build from source; anything else → image ref.
+		if fi, err := os.Stat(args[1]); err == nil && fi.IsDir() {
+			req.SourceDir = args[1]
+			req.Image = ""
+		} else {
+			req.Image = args[1]
+		}
 	}
-	res, err := buildOrchestrator().Deploy(context.Background(), service, image)
+	res, err := buildOrchestrator().Deploy(context.Background(), req)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("deployed %s → %s (guest %s, tap %s)\n", service, res.URL, res.GuestIP, res.TapDev)
+	fmt.Printf("deployed %s → %s (guest %s, tap %s)\n", req.Service, res.URL, res.GuestIP, res.TapDev)
 	return nil
 }
 

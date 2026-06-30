@@ -36,6 +36,23 @@ func (f *fakeRunner) Stop(_ context.Context, tap string) error {
 	return nil
 }
 
+type fakeBuilder struct {
+	mu       sync.Mutex
+	built    []string // tags built
+	rootfs   string
+	buildErr error
+}
+
+func (f *fakeBuilder) Build(_ context.Context, _, tag string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.buildErr != nil {
+		return "", f.buildErr
+	}
+	f.built = append(f.built, tag)
+	return f.rootfs, nil
+}
+
 func TestDeployBootsRegistersAndReturnsURL(t *testing.T) {
 	routePosted := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +66,7 @@ func TestDeployBootsRegistersAndReturnsURL(t *testing.T) {
 	runner := &fakeRunner{}
 	o := New(ipam.New(), edgeproxy.New(srv.URL), runner, "local")
 
-	res, err := o.Deploy(context.Background(), "web", "registry/web@sha256:abc")
+	res, err := o.Deploy(context.Background(), Request{Service: "web", Image: "registry/web@sha256:abc"})
 	if err != nil {
 		t.Fatalf("deploy: %v", err)
 	}
@@ -80,12 +97,12 @@ func TestDeployBootFailureReleasesLease(t *testing.T) {
 	alloc := ipam.New()
 	o := New(alloc, edgeproxy.New(srv.URL), runner, "local")
 
-	if _, err := o.Deploy(context.Background(), "web", "img"); err == nil {
+	if _, err := o.Deploy(context.Background(), Request{Service: "web", Image: "img"}); err == nil {
 		t.Fatal("expected deploy error")
 	}
 	// lease should have been released → next deploy reuses .2
 	runner.bootErr = nil
-	res, err := o.Deploy(context.Background(), "web2", "img")
+	res, err := o.Deploy(context.Background(), Request{Service: "web2", Image: "img"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,10 +120,53 @@ func TestDeployRouteFailureStopsVM(t *testing.T) {
 	runner := &fakeRunner{}
 	o := New(ipam.New(), edgeproxy.New(srv.URL), runner, "local")
 
-	if _, err := o.Deploy(context.Background(), "web", "img"); err == nil {
+	if _, err := o.Deploy(context.Background(), Request{Service: "web", Image: "img"}); err == nil {
 		t.Fatal("expected deploy error from route registration")
 	}
 	if len(runner.stopped) != 1 {
 		t.Fatalf("expected VM to be stopped on unwind, stopped=%v", runner.stopped)
+	}
+}
+
+func TestDeployBuildsRootfsFromSource(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	runner := &fakeRunner{}
+	builder := &fakeBuilder{rootfs: "/tmp/web.ext4"}
+	o := New(ipam.New(), edgeproxy.New(srv.URL), runner, "local").WithBuilder(builder)
+
+	res, err := o.Deploy(context.Background(), Request{Service: "web", SourceDir: "/src/web"})
+	if err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if res.URL != "http://web.local" {
+		t.Errorf("url = %s", res.URL)
+	}
+	if len(builder.built) != 1 || builder.built[0] != "antariksh/web:latest" {
+		t.Errorf("built tags = %v, want [antariksh/web:latest]", builder.built)
+	}
+	if len(runner.booted) != 1 || runner.booted[0].RootfsPath != "/tmp/web.ext4" {
+		t.Errorf("boot spec rootfs = %q, want /tmp/web.ext4", runner.booted[0].RootfsPath)
+	}
+}
+
+func TestDeployBuildFailureReleasesNothingAndErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	runner := &fakeRunner{}
+	builder := &fakeBuilder{buildErr: errors.New("docker build failed")}
+	o := New(ipam.New(), edgeproxy.New(srv.URL), runner, "local").WithBuilder(builder)
+
+	if _, err := o.Deploy(context.Background(), Request{Service: "web", SourceDir: "/src/web"}); err == nil {
+		t.Fatal("expected build error")
+	}
+	if len(runner.booted) != 0 {
+		t.Errorf("no VM should boot when build fails, booted=%d", len(runner.booted))
 	}
 }
